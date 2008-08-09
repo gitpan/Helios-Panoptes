@@ -9,9 +9,9 @@ use Data::Dumper;
 use CGI::Application::Plugin::DBH qw(dbh_config dbh);
 use Error qw(:try);
 
-use Helios::Worker;
+use Helios::Service;
 
-our $VERSION = '1.29_02';
+our $VERSION = '1.40';
 our $CONF_PARAMS;
 
 =head1 NAME
@@ -22,9 +22,9 @@ processing system
 =head1 DESCRIPTION
 
 Helios::Panoptes is the web interface to the Helios distributed job processing system.  It 
-provides a central point of control for all of the workers and jobs in a Helios collective.  This 
-web interface can be used to track jobs through the system and manage workloads on a per worker 
-class and per host basis.  Available workers may be increased or decreased as necessary, tuned to 
+provides a central point of control for all of the services and jobs in a Helios collective.  This 
+web interface can be used to track jobs through the system and manage workloads on a per service 
+and per host basis.  Available workers may be increased or decreased as necessary, tuned to 
 match available resources.  Job processing can be held, or Helios daemons can be HALTed, from this 
 interface.
 
@@ -52,13 +52,13 @@ helios_params_tb.
 
 The Job Queue view provides views of waiting, running, and completed jobs in the Helios collective.
 
-=item worker_admin
+=item collective
 
-The Worker Admin provides a simple, dashboard-style view of the current worker daemons running in 
-the Helios collective, broken down by host.  The worker class version loaded is displayed, as well 
-as the daemons' last register time with the system.  Job processing can be held and unheld here, 
-and the daemons' run modes can be shifted between Normal and Overdrive mode.  Worker daemons can 
-also be shut down here via the HALT button.
+The Collective Admin provides a simple, dashboard-style view of the current services running in 
+the Helios collective, broken down by host.  The service class version is displayed, as well 
+as the daemons' uptime.  Job processing can be held and unheld here, and the daemons' run modes 
+can be shifted between Normal and Overdrive mode.  The maximum workers for each service can be 
+managed, and services can be shut down here via the HALT button.
 
 =item job_submit
 
@@ -78,8 +78,8 @@ sub setup {
 			ctrl_panel_mod => 'ctrl_panel_mod',
 			job_queue_view => 'job_queue_view',
 			job_detail => 'job_detail',
-			worker_admin => 'worker_admin',
-			job_submit => 'job_submit'
+			job_submit => 'job_submit',
+			collective => 'collective'
 	);
 
 	my $inifile;
@@ -88,12 +88,13 @@ sub setup {
 	} else {
 		$inifile = './helios.ini';
 	}
-	$self->{worker} = new Helios::Worker;
-	my %params = $self->{worker}->getParamsFromIni($inifile);
-	$CONF_PARAMS = \%params;
+	$self->{service} = Helios::Service->new();
+	$self->{service}->prep();
+	my $config = $self->{service}->getConfig();
+	$CONF_PARAMS = $config;
 		
 	# connect to db 
-	$self->dbh_config($params{dsn},$params{user},$params{password});
+	$self->dbh_config($config->{dsn},$config->{user},$config->{password});
 }
 
 =head2 teardown()
@@ -197,13 +198,12 @@ PNLSQL
 	$tmpl->param(TITLE => "Helios - Control Panel");
 	$tmpl->param(CLASSES => $classes);
 	return $tmpl->output();	
-#[]	return Dumper($classes);
 }
 
 
 =head2 ctrl_panel_mod()
 
-Run mode used to modify Helios config parameters.  Used by ctrl_panel() and worker_admin().
+Run mode used to modify Helios config parameters.  Used by ctrl_panel() and collective().
 
 The ctrl_panel_mod run mode uses the following parameters:
 
@@ -211,7 +211,7 @@ The ctrl_panel_mod run mode uses the following parameters:
 
 =item worker_class
 
-The worker class of the changed parameter
+The worker (service) class of the changed parameter
 
 =item host
 
@@ -276,7 +276,11 @@ sub job_queue_view {
 	my $self = shift;
 	my $q = $self->query();
 	my $job_status = $q->param('status');
-	if ( defined($job_status) && $job_status eq 'done') { return $self->_job_queue_view_completed($q); }
+	my $job_detail = $q->param('job_detail');
+	# "job_queue_view" is actually a basket of views, all sharing the same template
+	if ( defined($job_status) && $job_status eq 'done' && $job_detail) { return $self->_job_queue_view_done($q); }
+	if ( defined($job_status) && $job_status eq 'done' && !$job_detail) { return $self->_job_queue_count_done($q); }
+	if ( !$job_detail ) { return $self->_job_queue_count($q); }
 
 	my $dbh = $self->dbh();
 	my $now = time();
@@ -335,8 +339,8 @@ ACTIVEJOBSQL
 	# ORDER BY
 	$sql .= " ORDER BY funcid asc, run_after desc";
 
-#[]t	print $q->header();
-#[]t	print $sql;
+#t	print $q->header();
+#t	print $sql;
 
 	my $sth = $dbh->prepare($sql);
 	unless($sth) { throw Error::Simple($dbh->errstr); }
@@ -378,26 +382,24 @@ ACTIVEJOBSQL
 	}
 	push(@job_types, $current_job_class);
 
-#[]	return "dbresults\n". Dumper(@dbresult) . "job_types\n" . Dumper(@job_types);
 	my $tmpl = $self->load_tmpl(undef, die_on_bad_params => 0);
 	$tmpl->param(TITLE => "Helios - Job Queue");
 	$tmpl->param("STATUS_".$job_status, 1);
 	$tmpl->param("TIME_".$time_horizon, 1);
+	$tmpl->param("JOB_DETAIL_CHECKED" => 1);
 	$tmpl->param(JOB_CLASSES => \@job_types);
 	return $tmpl->output();	
 }
 
 
-=head2 _job_queue_view_completed()
+=head2 _job_queue_view_done()
 
 This method is called from job_queue_view() to deal with displaying completed jobs, which pulls 
-completed job data from helios_job_history_tb instead of the job table, and is very convoluted 
-currently due to a lack of Oracle-style RANK() function in MySQL.  It's currently scheduled for 
-overhaul.
+completed job data from helios_job_history_tb instead of the job table.
 
 =cut
 
-sub _job_queue_view_completed {
+sub _job_queue_view_done {
 	my $self = shift;
 	my $q = shift;
 	my $dbh = $self->dbh();
@@ -411,93 +413,101 @@ sub _job_queue_view_completed {
 	# defaults
 	my $time_horizon = 3600;
 
-	$sql = <<COMPJOBSQL;
-SELECT funcid,
-	jobid,
-	arg,
-	uniqkey,
-	insert_time,
-	run_after,
-	grabbed_until,
-	priority,
-	coalesce,
-	complete_time,
-	exitstatus
-FROM 
-	helios_job_history_tb
-COMPJOBSQL
+	$sql = '
+select *
+from (select 
+      if (@jid = jobid, 
+          if (@time = complete_time,
+              @rnk := @rnk + least(0,  @inc := @inc + 1),
+              @rnk := @rnk + greatest(@inc, @inc := 1)
+                           + least(0,  @time := complete_time)
+             ),
+          @rnk := 1 + least(0, @jid  := jobid) 
+                    + least(0, @time :=  complete_time)
+                    + least(0, @inc :=  1)
+         ) rank,
+      jobid,
+	  funcid,
+	  run_after,
+	  grabbed_until,
+	  exitstatus,
+	  complete_time
+      from helios_job_history_tb,
+           (select (@jid := 0)) as x
+      where complete_time >= ?
+      order by jobid, complete_time desc
+	 ) as y
+where rank < 2
+order by funcid asc, complete_time desc
+	';
 
 	# form values
 	if ( defined($q->param('time')) ) { $time_horizon = $q->param('time'); }
 	if ( defined($q->param('time')) && ($q->param('time') eq '') ) { $time_horizon = 3600; }
 	if ( defined($q->param('status')) ) { $job_status = $q->param('status'); }
 
-	# WHERE clause
-	$sql .= " WHERE complete_time > ".($now - $time_horizon);
-
-	# ORDER BY clause
-	$sql .= " ORDER BY funcid, jobid desc, complete_time desc ";
-
-#[]	print $q->header();
-#[]	print $sql;
+#t	print $q->header();		
+#t	print $sql,"<br>\n";
+#t	print $now - $time_horizon,"<br>\n";
 
 	my $sth = $dbh->prepare($sql);
 	unless($sth) { throw Error::Simple($dbh->errstr); }
 
-	$sth->execute() or throw Error::Simple($dbh->errstr());
+	$sth->execute($now - $time_horizon) or throw Error::Simple($dbh->errstr());
 
 	my @job_types;
 	my $job_count = 0;
+	my $job_count_failed = 0;
 	my @dbresult;
 	my $current_job_class;
 	my $first_result = 1;
 	my $last_class = undef;
 	my $last_jobid = 0;
-	while ( my $result = $sth->fetchrow_arrayref() ) {
+	while ( my $result = $sth->fetchrow_hashref() ) {
+#		print join("|",($result->{rank},$result->{funcid},$result->{jobid},$result->{complete_time},$result->{run_after},$result->{exitstatus},$result->{run_after},$result->{grabbed_until})),"<br>\n";		#p
 		if ($first_result) {
-			$last_class = $result->[0];
+			$last_class = $result->{funcid};
 			$first_result = 0;
 		}
-		if ($result->[0] ne $last_class) {
+		if ($result->{funcid} ne $last_class) {
 			push(@job_types, $current_job_class);
 			undef $current_job_class;
-			$last_class = $result->[0];
+			$last_class = $result->{funcid};
 			$job_count = 0;
+			$job_count_failed = 0;
 		}
 		
-		my $date_parts = $self->splitEpochDate($result->[5]);
-		my $complete_time = $self->splitEpochDate($result->[9]);
-		$current_job_class->{JOB_CLASS} = $funcmap->{$result->[0]};
+		my $date_parts = $self->splitEpochDate($result->{run_after});
+		my $complete_time = $self->splitEpochDate($result->{complete_time});
+		$current_job_class->{JOB_CLASS} = $funcmap->{$result->{funcid}};
 		$current_job_class->{JOB_COUNT} = ++$job_count;
+		if ( $result->{exitstatus} != 0 ) { $current_job_class->{JOB_COUNT_FAILED} = ++$job_count_failed; }
 		# if this jobid is the same as the last, that means it was a failure that was retried
 		# dump it, because we've already added the final completion of the job (whether success or fail)
 		# because we sorted "jobid, complete_time desc"
-		if ($result->[1] == $last_jobid) { next; }
 		push(@{ $current_job_class->{JOBS} }, 
-				{	JOBID => $result->[1],
+				{	JOBID => $result->{jobid},
 #					ARG => $result->[2],
-					UNIQKEY => $result->[3],
-					INSERT_TIME => $result->[4],
 					RUN_AFTER => $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS},
-					GRABBED_UNTIL => $result->[6],
-					PRIORITY => $result->[7],
-					COALESCE => $result->[8],
+					GRABBED_UNTIL => $result->{grabbed_until},
 					COMPLETE_TIME => $complete_time->{YYYY}.'-'.$complete_time->{MM}.'-'.$complete_time->{DD}.' '.$complete_time->{HH24}.':'.$complete_time->{MI}.':'.$complete_time->{SS},
-					EXITSTATUS => $result->[10]
+					EXITSTATUS => $result->{exitstatus}
 				});
-		$last_jobid = $result->[1];
+		$last_jobid = $result->{jobid};
 	}
 	push(@job_types, $current_job_class);
+	@job_types = sort { $a->{JOB_CLASS} cmp $b->{JOB_CLASS} } @job_types;
 	my $tmpl = $self->load_tmpl('job_queue_view.html', die_on_bad_params => 0);
 	$tmpl->param(TITLE => 'Helios - Job Queue');
 	$tmpl->param("STATUS_".$job_status, 1);
 	$tmpl->param("TIME_".$time_horizon, 1);
+	$tmpl->param("JOB_DETAIL_CHECKED" => 1);
 	$tmpl->param(JOB_CLASSES => \@job_types);
 	return $tmpl->output();	
 }
 
 
-=head2 _job_queue_count() NOT YET IMPLEMENTED
+=head2 job_queue_count()
 
 This method will handle a job queue view that displays only counts.
 
@@ -507,7 +517,6 @@ sub _job_queue_count {
 	my $self = shift;
 	my $q = $self->query();
 	my $job_status = $q->param('status');
-#	if ( $job_status eq 'done') { return $self->_job_queue_view_completed($q); }
 
 	my $dbh = $self->dbh();
 	my $now = time();
@@ -520,16 +529,11 @@ sub _job_queue_count {
 	my $time_horizon = 3600;
 	$job_status = 'run';
 
-	$sql = <<JOBCOUNTSQL;
-SELECT funcid,
-	count(*) 
-FROM 
-	job j
-JOBCOUNTSQL
-
 	# form values
 	if ( defined($q->param('time')) ) { $time_horizon = $q->param('time'); }
 	if ( defined($q->param('status')) ) { $job_status = $q->param('status'); }
+
+	$sql = "SELECT funcid, count(*) FROM job ";
 
 	SWITCH: {
 		if ($job_status eq 'run') { 
@@ -542,7 +546,7 @@ JOBCOUNTSQL
 			push(@where_clauses,"grabbed_until < $now");
 			last SWITCH;
 		}
-		#[] default 
+		# default 
 		$time_horizon = 'all';
 	}
 
@@ -556,6 +560,9 @@ JOBCOUNTSQL
 		$sql .= " WHERE ". join(' AND ',@where_clauses);
 	}
 
+	# GROUP BY
+	$sql .= " GROUP BY funcid";
+	
 	# ORDER BY
 	$sql .= " ORDER BY funcid asc";
 
@@ -582,25 +589,125 @@ JOBCOUNTSQL
 			$job_count = 0;
 		}
 		
-		my $date_parts = $self->splitEpochDate($result->[5]);
-		my $grabbed_until = $self->splitEpochDate($result->[6]);
 		$current_job_class->{JOB_CLASS} = $funcmap->{$result->[0]};
-		$current_job_class->{JOB_COUNT} = ++$job_count;
-		push(@{ $current_job_class->{JOBS} }, 
-				{	JOBID => $result->[1],
-#					ARG => $result->[2],
-					UNIQKEY => $result->[3],
-					INSERT_TIME => $result->[4],
-					RUN_AFTER => $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS},
-					GRABBED_UNTIL => $grabbed_until->{YYYY}.'-'.$grabbed_until->{MM}.'-'.$grabbed_until->{DD}.' '.$grabbed_until->{HH24}.':'.$grabbed_until->{MI}.':'.$grabbed_until->{SS},
-					PRIORITY => $result->[7],
-					COALESCE => $result->[8]
-				});
+		$current_job_class->{JOB_COUNT} = $result->[1];
 	}
 	push(@job_types, $current_job_class);
 
-
+	my $tmpl = $self->load_tmpl('job_queue_view.html', die_on_bad_params => 0);
+	$tmpl->param(TITLE => "Helios - Job Queue");
+	$tmpl->param("STATUS_".$job_status, 1);
+	$tmpl->param("TIME_".$time_horizon, 1);
+	$tmpl->param("JOB_DETAIL_CHECKED" => 0);
+	$tmpl->param(JOB_CLASSES => \@job_types);
+	return $tmpl->output();	
 }
+
+
+sub _job_queue_count_done {
+	my $self = shift;
+	my $q = shift;
+	my $dbh = $self->dbh();
+	my $now = time();
+	my $funcmap = $self->loadFuncMap();
+	my $job_status;
+	my $output;
+	my $sql;
+	my @where_clauses;
+
+	# defaults
+	my $time_horizon = 3600;
+
+	$sql = '
+select funcid, if(exitstatus,1,0) as exitstatus, count(*) as count
+from (select 
+      if (@jid = jobid, 
+          if (@time = complete_time,
+              @rnk := @rnk + least(0,  @inc := @inc + 1),
+              @rnk := @rnk + greatest(@inc, @inc := 1)
+                           + least(0,  @time := complete_time)
+             ),
+          @rnk := 1 + least(0, @jid  := jobid) 
+                    + least(0, @time :=  complete_time)
+                    + least(0, @inc :=  1)
+         ) rank,
+	  jobid,
+	  funcid,
+	  run_after,
+	  exitstatus,
+	  complete_time
+      from helios_job_history_tb,
+           (select (@jid := 0)) as x
+      where complete_time >= ?
+      order by jobid, complete_time desc
+	 ) as y
+where rank < 2
+GROUP BY funcid, if(exitstatus,1,0)
+	';
+
+	# form values
+	if ( defined($q->param('time')) ) { $time_horizon = $q->param('time'); }
+	if ( defined($q->param('time')) && ($q->param('time') eq '') ) { $time_horizon = 3600; }
+	if ( defined($q->param('status')) ) { $job_status = $q->param('status'); }
+
+#t	print $q->header();		
+#t	print $sql,"<br>\n";
+#t	print $now - $time_horizon,"<br>\n";
+
+	my $sth = $dbh->prepare($sql);
+	unless($sth) { throw Error::Simple($dbh->errstr); }
+
+	$sth->execute($now - $time_horizon) or throw Error::Simple($dbh->errstr());
+
+	my @job_types;
+	my $current_funcid;
+	my $current_success_jobs = 0;
+	my $current_failed_jobs = 0;
+	my $last_funcid;
+	my $first_result = 1;
+
+	while ( my $result = $sth->fetchrow_arrayref() ) {
+#		print join("|",@$result),"<br>\n";		#p
+		if ($first_result) {
+			$last_funcid = $result->[0];
+			$current_funcid = $result->[0];
+			$first_result = 0;
+		}
+
+		if ($current_funcid ne $result->[0] ) {
+			# flush
+			push(@job_types, { JOB_CLASS => $funcmap->{$current_funcid}, 
+								JOB_COUNT => $current_success_jobs + $current_failed_jobs, 
+								JOB_COUNT_FAILED =>  $current_failed_jobs
+								}
+			);
+			$last_funcid = $result->[0];
+			$current_success_jobs = 0;
+			$current_failed_jobs = 0;
+		}
+		$current_funcid = $result->[0];
+		if ($result->[1] == 0) {
+			$current_success_jobs = $result->[2];
+		} else {
+			$current_failed_jobs = $result->[2];
+		}
+	}
+	push(@job_types, { JOB_CLASS => $funcmap->{$current_funcid}, 
+						JOB_COUNT => $current_success_jobs + $current_failed_jobs, 
+						JOB_COUNT_FAILED =>  $current_failed_jobs
+						}
+	);
+	@job_types = sort { $a->{JOB_CLASS} cmp $b->{JOB_CLASS} } @job_types;
+
+	my $tmpl = $self->load_tmpl('job_queue_view.html', die_on_bad_params => 0);
+	$tmpl->param(TITLE => 'Helios - Job Queue');
+	$tmpl->param("STATUS_".$job_status, 1);
+	$tmpl->param("TIME_".$time_horizon, 1);
+	$tmpl->param("JOB_DETAIL_CHECKED" => 0);
+	$tmpl->param(JOB_CLASSES => \@job_types);
+	return $tmpl->output();	
+}
+
 
 
 =head2 job_submit()
@@ -644,13 +751,15 @@ sub job_submit {
 }
 
 
-=head2 worker_admin()
+=head2 collective()
 
-The worker_admin() run mode provides the Worker Admin display, a list of what worker daemons are running on what servers, with some limited convenience controls for admins that don't want to deal with the Ctrl Panel.
+The collective() run mode provides the Collective display, a list of what Helios service daemons are 
+running in the collective, with some limited convenience controls for admins that don't want to deal 
+with the Ctrl Panel.
 
 =cut
 
-sub worker_admin {
+sub collective {
 	my $self = shift;
 	my $dbh = $self->dbh();
 	my $q = $self->query();
@@ -663,7 +772,8 @@ SELECT host,
 	worker_class, 
 	worker_version, 
 	process_id, 
-	register_time
+	register_time,
+	start_time
 FROM helios_worker_registry_tb
 WHERE register_time > ?
 ORDER BY host, worker_class
@@ -674,7 +784,7 @@ STATUSSQL
 
 	$sth->execute($register_threshold) or throw Error::Simple($dbh->errstr());
 
-	my @worker_hosts;
+	my @collective;
 	my @dbresult;
 	my $current_host;
 	my $first_result = 1;
@@ -685,20 +795,41 @@ STATUSSQL
 			$first_result = 0;
 		}
 		if ($result->[0] ne $last_host) {
-			push(@worker_hosts, $current_host);
+			push(@collective, $current_host);
 			undef $current_host;
 			$last_host = $result->[0];
 		}
 		
 		my $date_parts = $self->splitEpochDate($result->[4]);
 		$current_host->{HOST} = $result->[0];
+
+		# calc uptime
+		my $uptime_string = '';
+		{
+			use integer;
+			my $uptime = time() - $result->[5];
+			my $uptime_days = $uptime/86400;
+			my $uptime_hours = ($uptime % 86400)/3600;
+			my $uptime_mins = (($uptime % 86400) % 3600)/60;
+			if ($uptime_days != 0) { $uptime_string .= $uptime_days.'d '; }
+			if ($uptime_hours != 0) { $uptime_string .= $uptime_hours.'h '; }
+			if ($uptime_mins != 0) { $uptime_string .= $uptime_mins.'m '; }
+		}
+
+		# max_workers
+		my $max_workers = 1;
+		if ( defined($config->{ $result->[0] }->{ $result->[1] }->{MAX_WORKERS}) ) {
+			$max_workers = $config->{ $result->[0] }->{ $result->[1] }->{MAX_WORKERS};
+		} 
+
+		# figure out status (normal/overdrive/holding/halting)
 		my $status;
 		my $halt_status = 0;
 		my $hold_status = 0;
-		my $super_status = 0;
+		my $overdrive_status = 0;
 		if ( (defined( $config->{$result->[0] }->{ $result->[1] }->{OVERDRIVE}) && ($config->{$result->[0] }->{ $result->[1] }->{OVERDRIVE} == 1) ) ||
 			(defined( $config->{'*'}->{ $result->[1] }->{OVERDRIVE}) && ($config->{'*'}->{ $result->[1] }->{OVERDRIVE} == 1) ) ) {
-			$super_status = 1;
+			$overdrive_status = 1;
 			$status = "Overdrive";
 		}
 		if ( (defined( $config->{$result->[0] }->{ $result->[1] }->{HOLD}) && ($config->{$result->[0] }->{ $result->[1] }->{HOLD} == 1) ) ||
@@ -711,23 +842,25 @@ STATUSSQL
 			$halt_status = 1;
 			$status = "HALTING";
 		}
-		push(@{ $current_host->{WORKERS} }, 
-				{	HOST => $result->[0],
-					WORKER_CLASS => $result->[1],
-					WORKER_VERSION => $result->[2],
-					PROCESS_ID => $result->[3],
-					REGISTER_TIME => $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS},
-					STATUS => $status,
-					SUPER => $super_status,
-					HOLDING => $hold_status,
-					HALTING => $halt_status,
+		push(@{ $current_host->{SERVICES} }, 
+				{	HOST            => $result->[0],
+					SERVICE_CLASS   => $result->[1],
+					SERVICE_VERSION => $result->[2],
+					PROCESS_ID      => $result->[3],
+					REGISTER_TIME   => $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS},
+					UPTIME          => $uptime_string,
+					STATUS          => $status,
+					MAX_WORKERS     => $max_workers,
+					OVERDRIVE       => $overdrive_status,
+					HOLDING         => $hold_status,
+					HALTING         => $halt_status,
 				});
 	}
-	push(@worker_hosts, $current_host);
+	push(@collective, $current_host);
 	
-	my $tmpl = $self->load_tmpl('worker_admin.html', die_on_bad_params => 0);
-	$tmpl->param(TITLE => 'Helios - Worker Admin');
-	$tmpl->param(WORKER_HOSTS => \@worker_hosts);
+	my $tmpl = $self->load_tmpl('collective.html', die_on_bad_params => 0);
+	$tmpl->param(TITLE => 'Helios - Collective View');
+	$tmpl->param(COLLECTIVE => \@collective);
 	return $tmpl->output();	
 }
 
@@ -831,7 +964,7 @@ sub loadClassMap {
 =head2 loadFuncMap
 
 Load the contents of the funcmap table into memory, because it's small and lots of methods 
-need it.  THe funcmap table associates a funcid with a worker class name for internal purposes.
+need it.  THe funcmap table associates a funcid with a service class name for internal purposes.
 
 =cut
 
@@ -891,7 +1024,7 @@ sub loadParams {
 
 =head2 modParam($action, $worker_class, $host, $param, [$value])
 
-Modify Helios config parameters.  Used by ctrl_panel() and worker_admin() displays.
+Modify Helios config parameters.  Used by ctrl_panel() and collective() displays.
 
 Valid values for $action:
 
@@ -966,7 +1099,7 @@ __END__
 
 =head1 SEE ALSO
 
-L<Helios::Worker>, L<helios.pl>, <CGI::Application>, L<HTML::Template>
+L<Helios::Service>, L<helios.pl>, <CGI::Application>, L<HTML::Template>
 
 =head1 AUTHOR 
 
@@ -976,7 +1109,9 @@ Andrew Johnson, <ajohnson at ittoolbox dotcom>
 
 Copyright (C) 2008 by CEB Toolbox, Inc.
 
-This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may have available.
+This library is free software; you can redistribute it and/or modify it under the same terms as 
+Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may 
+have available.
 
 =head1 WARRANTY 
 

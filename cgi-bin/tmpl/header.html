@@ -16,6 +16,8 @@ BODY {
  background-color: midnightblue;
  font-weight: bold;
  padding: 5px;
+ border-right: solid 2px black;
+ border-bottom: solid 2px black;
 }
 .job {
  margin-left: 10px;
@@ -169,10 +171,10 @@ form
 
 <div class="nav_bar">
 <b>HELIOS:</b>	<ul>
-		<li><a href="panoptes.pl">Job Queue</a></li>
+		<li><a href="panoptes.pl?rm=job_queue_view">Job Queue</a></li>
 		<li><a href="errorlog.pl">Error Log</a></li>
+		<li><a href="panoptes.pl?rm=collective">Collective Admin</a></li>
 		<li><a href="panoptes.pl?rm=ctrl_panel">Ctrl Panel</a></li>
-		<li><a href="panoptes.pl?rm=worker_admin">Worker Admin</a></li>
 		<li><a href="panoptes.pl?rm=job_submit">Submit Job</a></li>
 	</ul>
 </div>

@@ -1,5 +1,10 @@
 Revision history for Perl extension Helios::Panoptes.
 
+1.40 Sat Aug  9 03:00:00 2008
+	-First production release
+	-Uses new Helios 2.0 API
+	-Worker Admin view replaced with Collective Admin
+	-Job Queue view now has count only option
 1.29_02 
 	-Fixed Helios::Worker dependency in Makefile.PL (oops)
 1.29_01 Fri May 23 10:00:00 2008

@@ -7,7 +7,7 @@ use Data::Dumper;
 use DBI;
 use Helios::Worker;
 
-our $VERSION = '1.29_01';
+our $VERSION = '1.40';
 our $dbh;
 our %config;
 

@@ -15,8 +15,8 @@ WriteMakefile(
                                                   => 4.00,
                            'HTML::Template'       => 2.90,
                            'Parse::RecDescent'    => '',		# needed by HTML::Template::Expr
-                           'HTML::Template::Expr' => 0.07,
-                           'Helios::Worker'       => 1.19,
+                           'HTML::Template::Expr' => 0.04,
+                           'Helios'               => 2.00,
 
                          }
 );

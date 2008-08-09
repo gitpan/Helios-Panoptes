@@ -10,7 +10,7 @@ use HTML::Template::Expr;
 
 use Error qw(:try);
 
-our $VERSION = '1.29_01';
+our $VERSION = '1.40';
 
 =head1 NAME
 

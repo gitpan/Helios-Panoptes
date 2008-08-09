@@ -3,7 +3,7 @@
 <br />
 
  <tmpl_loop classes>
- <div class="class"><tmpl_var worker_class></div>
+ <div class="class"><a name="<tmpl_var worker_class>" /><tmpl_var worker_class></div>
 
  <tmpl_loop hosts>
 	<div class="job_header" style="border: solid 1px black; font-weight: bold; margin-left: 10px;">Host: <tmpl_var host></div>
