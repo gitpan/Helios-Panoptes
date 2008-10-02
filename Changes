@@ -1,5 +1,8 @@
 Revision history for Perl extension Helios::Panoptes.
 
+1.42 Thu Sep 25 15:10:00 2008
+	-Ctrl Panel doesn't bomb if there are no config params in helios_params_tb
+	-Job Submit now reports helios_class_map job type and the associated service
 1.40 Sat Aug  9 03:00:00 2008
 	-First production release
 	-Uses new Helios 2.0 API

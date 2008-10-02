@@ -5,10 +5,10 @@
 <div style="margin: 5px;">
 
 <form method="post" action="<tmpl_var job_submit_url>">
-	<b>Worker Class</b> <br />
+	<b>Job Type (Service Class)</b> <br />
 	<select name="type" >
 		<tmpl_loop classes>
-		<option value="<tmpl_var job_type>"><tmpl_var job_class></option>
+		<option value="<tmpl_var job_type>"><tmpl_var job_type> (<tmpl_var job_class>)</option>
 		</tmpl_loop>
 	</select>
 <br />

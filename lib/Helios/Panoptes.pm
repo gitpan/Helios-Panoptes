@@ -11,7 +11,7 @@ use Error qw(:try);
 
 use Helios::Service;
 
-our $VERSION = '1.40';
+our $VERSION = '1.42';
 our $CONF_PARAMS;
 
 =head1 NAME
@@ -144,7 +144,7 @@ PNLSQL
 
 	my $classes;
 	my $hosts;
-	my $params;
+	my $params = [];
 	my $last_host;
 	my $last_class;
 	my $current_host;
@@ -196,7 +196,11 @@ PNLSQL
 	
 	my $tmpl = $self->load_tmpl(undef, die_on_bad_params => 0);
 	$tmpl->param(TITLE => "Helios - Control Panel");
-	$tmpl->param(CLASSES => $classes);
+
+	# only fill in parameters if we actually have some
+	if ( $classes->[0]->{HOSTS}->[0]->{HOST} ) {
+		$tmpl->param(CLASSES => $classes);
+	}
 	return $tmpl->output();	
 }
 
