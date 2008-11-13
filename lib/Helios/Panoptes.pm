@@ -11,7 +11,7 @@ use Error qw(:try);
 
 use Helios::Service;
 
-our $VERSION = '1.42';
+our $VERSION = '1.432';
 our $CONF_PARAMS;
 
 =head1 NAME
@@ -79,7 +79,7 @@ sub setup {
 			job_queue_view => 'job_queue_view',
 			job_detail => 'job_detail',
 			job_submit => 'job_submit',
-			collective => 'collective'
+			collective => 'collective',
 	);
 
 	my $inifile;
@@ -260,6 +260,9 @@ sub ctrl_panel_mod {
 	$self->modParam($action, $worker_class, $host, $param, $value);
 
 	if (defined($return_to)) {
+		if ( defined($q->param('groupby')) ) { 
+			print $q->redirect("./panoptes.pl?rm=$return_to&groupby=".$q->param('groupby')); 
+		}
 		print $q->redirect("./panoptes.pl?rm=$return_to");
 	} else {
 		print $q->redirect('./panoptes.pl?rm=ctrl_panel');
@@ -757,13 +760,34 @@ sub job_submit {
 
 =head2 collective()
 
-The collective() run mode provides the Collective display, a list of what Helios service daemons are 
-running in the collective, with some limited convenience controls for admins that don't want to deal 
-with the Ctrl Panel.
+The collective() run mode provides the Collective display, a list of what Helios service daemons 
+are running in the collective, with some limited convenience controls for admins that don't want 
+to deal with the Ctrl Panel.
+
+The collective() method actually reads the groupby CGI parameter and dispatches to 
+_collective_host() or _collective_service(), depending on which the user specified (the default 
+is service).
 
 =cut
 
 sub collective {
+	my $self = shift;
+	my $q = $self->query();
+	if ($q->param('groupby') eq 'service') {
+		return $self->_collective_service();		
+	} else {
+		return $self->_collective_host();
+	}
+}
+
+
+=head2 _collective_host()
+
+The _collective_host() method provides the Collective display grouped by host.
+
+=cut 
+
+sub _collective_host {
 	my $self = shift;
 	my $dbh = $self->dbh();
 	my $q = $self->query();
@@ -862,11 +886,138 @@ STATUSSQL
 	}
 	push(@collective, $current_host);
 	
-	my $tmpl = $self->load_tmpl('collective.html', die_on_bad_params => 0);
+	my $tmpl = $self->load_tmpl('collective_host.html', die_on_bad_params => 0);
 	$tmpl->param(TITLE => 'Helios - Collective View');
 	$tmpl->param(COLLECTIVE => \@collective);
 	return $tmpl->output();	
 }
+
+
+=head2 _collective_service()
+
+The _collective_service() method provides the Collective display grouped by service.
+
+=cut
+
+sub _collective_service {
+	my $self = shift;
+	my $dbh = $self->dbh();
+	my $q = $self->query();
+	my $config = $self->loadParams('worker_class');
+
+	my $register_threshold = time() - 360;
+
+	my $sql = <<STATUSSQL;
+SELECT worker_class AS service,
+	host, 
+	worker_version AS version, 
+	process_id, 
+	register_time,
+	start_time
+FROM helios_worker_registry_tb
+WHERE register_time > ?
+ORDER BY service, host
+STATUSSQL
+	
+	my $sth = $dbh->prepare($sql);
+	unless ($sth) { throw Error::Simple($dbh->errstr);	}
+
+	$sth->execute($register_threshold) or throw Error::Simple($dbh->errstr());
+
+	my @collective;
+	my @dbresult;
+	my $current_service;
+	my $first_result = 1;
+	my $last_service = undef;
+#t	print $q->header();		
+	while ( my $result = $sth->fetchrow_arrayref() ) {
+#t		print join("|", @$result),"<br>\n";		
+		if ($first_result) {
+			$last_service = $result->[0];
+			$first_result = 0;
+		}
+		if ($result->[0] ne $last_service) {
+			push(@collective, $current_service);
+			undef $current_service;
+			$last_service = $result->[0];
+		}
+		
+		my $date_parts = $self->splitEpochDate($result->[4]);
+		$current_service->{SERVICE_CLASS} = $result->[0];
+
+		# calc uptime
+		my $uptime_string = '';
+		{
+			use integer;
+			my $uptime = time() - $result->[5];
+			my $uptime_days = $uptime/86400;
+			my $uptime_hours = ($uptime % 86400)/3600;
+			my $uptime_mins = (($uptime % 86400) % 3600)/60;
+			if ($uptime_days != 0) { $uptime_string .= $uptime_days.'d '; }
+			if ($uptime_hours != 0) { $uptime_string .= $uptime_hours.'h '; }
+			if ($uptime_mins != 0) { $uptime_string .= $uptime_mins.'m '; }
+		}
+
+		# max_workers
+		my $max_workers = 1;
+		if ( defined($config->{ $result->[0] }->{ '*' }->{MAX_WORKERS}) ) {
+			$max_workers = $config->{ $result->[0] }->{ '*' }->{MAX_WORKERS};
+		} 
+		if ( defined($config->{ $result->[0] }->{ $result->[1] }->{MAX_WORKERS}) ) {
+			$max_workers = $config->{ $result->[0] }->{ $result->[1] }->{MAX_WORKERS};
+		} 
+
+		# figure out status (normal/overdrive/holding/halting)
+		my $status;
+		my $halt_status = 0;
+		my $hold_status = 0;
+		my $overdrive_status = 0;
+		# determine overdrive status
+		if ( defined($config->{$result->[0]}->{'*'}->{OVERDRIVE}) && ($config->{$result->[0]}->{'*'}->{OVERDRIVE} == 1) ) {
+			$overdrive_status = 1;
+		}
+		if ( defined($config->{$result->[0]}->{$result->[1]}->{OVERDRIVE}) ) {
+			$overdrive_status = $config->{$result->[0]}->{$result->[1]}->{OVERDRIVE};
+		}
+
+		# determine holding status
+		if ( defined($config->{$result->[0]}->{'*'}->{HOLD}) && ($config->{$result->[0]}->{'*'}->{HOLD} == 1) ) {
+			$hold_status = 1;
+		}
+		if ( defined($config->{$result->[0]}->{$result->[1]}->{HOLD}) ) {
+			$hold_status = $config->{$result->[0]}->{$result->[1]}->{HOLD};
+		}
+
+
+		# determine halt status; if it's even defined, that means the service instance is HALTing
+		if ( defined( $config->{$result->[0] }->{ '*' }->{HALT}) ||
+				defined( $config->{$result->[0]}->{ $result->[1] }->{HALT}) ) {
+			$halt_status = 1;
+			$status = "HALTING";
+		}
+		push(@{ $current_service->{HOSTS} }, 
+				{	HOST            => $result->[1],
+					SERVICE_CLASS   => $result->[0],
+					SERVICE_VERSION => $result->[2],
+					PROCESS_ID      => $result->[3],
+					REGISTER_TIME   => $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS},
+					UPTIME          => $uptime_string,
+					STATUS          => $status,
+					MAX_WORKERS     => $max_workers,
+					OVERDRIVE       => $overdrive_status,
+					HOLDING         => $hold_status,
+					HALTING         => $halt_status,
+				});
+	}
+	push(@collective, $current_service);
+	
+	my $tmpl = $self->load_tmpl('collective_service.html', die_on_bad_params => 0);
+	$tmpl->param(TITLE => 'Helios - Collective View');
+	$tmpl->param(COLLECTIVE => \@collective);
+	return $tmpl->output();	
+}
+
+
 
 
 =head1 OTHER METHODS

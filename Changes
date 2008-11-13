@@ -1,5 +1,8 @@
 Revision history for Perl extension Helios::Panoptes.
 
+1.432 Tue Nov 11 13:00:00 2008
+	-Added "group by" capabilities to collective view; can group 
+	service instances by service name or host
 1.42 Thu Sep 25 15:10:00 2008
 	-Ctrl Panel doesn't bomb if there are no config params in helios_params_tb
 	-Job Submit now reports helios_class_map job type and the associated service

@@ -8,7 +8,8 @@ cgi-bin/tmpl/header.html
 cgi-bin/tmpl/job_log.html
 cgi-bin/tmpl/job_queue_view.html
 cgi-bin/tmpl/job_submit.html
-cgi-bin/tmpl/collective.html
+cgi-bin/tmpl/collective_host.html
+cgi-bin/tmpl/collective_service.html
 Changes
 lib/Helios/Panoptes.pm
 lib/Helios/Panoptes/ErrorLog.pm
