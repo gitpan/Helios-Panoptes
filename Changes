@@ -1,5 +1,10 @@
 Revision history for Perl extension Helios::Panoptes.
 
+1.44 Tue Apr 28 17:55:00 2009
+	-JobLog.pm: removed some unnecessary JOINs to greatly improve 
+	performance
+	-Helper.pm: removed dependency on deprecated Helios::Worker
+	-updated contact & copyright info
 1.432 Tue Nov 11 13:00:00 2008
 	-Added "group by" capabilities to collective view; can group 
 	service instances by service name or host

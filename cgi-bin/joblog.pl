@@ -17,16 +17,15 @@ The joblog.pl is the CGI script that actually runs the Helios::Panoptes::JobLog 
 
 =head1 SEE ALSO
 
-L<Helios::Panoptes::JobLog>, L<Helios::Panoptes>, L<Helios::Worker>, L<helios.pl>, 
-<CGI::Application>, L<HTML::Template>
+L<Helios::Panoptes>, L<Helios::Service>, L<helios.pl>, <CGI::Application>, L<HTML::Template>
 
 =head1 AUTHOR 
 
-Andrew Johnson, <ajohnson at ittoolbox dotcom>
+Andrew Johnson, <lajandy at cpan dotorg>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2008 by CEB Toolbox, Inc.
+Copyright (C) 2008-9 by CEB Toolbox, Inc.
 
 This library is free software; you can redistribute it and/or modify it under the same terms as 
 Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may 

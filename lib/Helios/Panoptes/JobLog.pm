@@ -10,7 +10,7 @@ use HTML::Template::Expr;
 
 use Error qw(:try);
 
-our $VERSION = '1.40';
+our $VERSION = '1.44';
 
 =head1 NAME
 
@@ -70,13 +70,9 @@ sub job_log {
 	return "" if $job_id == -1;
 	
 	$sql = "
-		SELECT
-			job.*,
-			funcmap.funcname
+		SELECT *
 		FROM
 			job
-		INNER JOIN
-			funcmap ON funcmap.funcid = job.funcid
 		WHERE
 			jobid = ?
 	";
@@ -116,13 +112,9 @@ sub job_log {
 	$job_details->{priority} = $priority{$job_details->{priority}} || $job_details->{priority};
 
 	$sql = "
-		SELECT
-			error.*,
-			funcmap.funcname
+		SELECT *
 		FROM
 			error
-		INNER JOIN
-			funcmap ON funcmap.funcid = error.funcid
 		WHERE
 			jobid = ?
 	";
@@ -140,13 +132,9 @@ sub job_log {
 	}
 
 	$sql = "
-		SELECT
-			helios_job_history_tb.*,
-			funcmap.funcname
+		SELECT *
 		FROM
 			helios_job_history_tb
-		INNER JOIN
-			funcmap ON funcmap.funcid = helios_job_history_tb.funcid
 		WHERE
 			jobid = ?
 		ORDER BY
@@ -239,10 +227,14 @@ sub job_log {
 	}
 
 	$job_details = $job_history[0] if(!$job_details->{arg});
-	
-	
-#[]	$job_details->{arg} =~ m/(<.*>)/g;
-#[]	$job_details->{arg} = $1;
+    my $func_details = Helios::Panoptes::Helper::db_fetch_row("SELECT funcname FROM funcmap WHERE funcid = ?", $job_details->{funcid});
+    for (my $i = 0; $i < @job_history; $i++) { 
+        $job_history[$i]->{funcname} = $func_details->{funcname};  
+    }
+    for (my $i = 0; $i < @job_error; $i++) { 
+        $job_error[$i]->{funcname} = $func_details->{funcname};  
+    }
+    
 	# this handles <params> w/newlines
 	$job_details->{arg} =~ s/^.*?\</\</s;
 	
@@ -260,7 +252,7 @@ sub job_log {
 	$tmpl->param(JOB_PRIORITY => $job_details->{priority});
 	$tmpl->param(JOB_RUN_AFTER => $job_details->{run_after});
 	$tmpl->param(JOB_COALESCE => $job_details->{coalesce});
-	$tmpl->param(JOB_FUNCTION_NAME => $job_details->{funcname});
+	$tmpl->param(JOB_FUNCTION_NAME => $func_details->{funcname});
 	$tmpl->param(JOB_UNIQUE_KEY => $job_details->{uniqkey});
 	$tmpl->param(JOB_INSERT_TIME => $job_details->{insert_time});
 	$tmpl->param(JOB_GRABBED_UNTIL => $job_details->{grabbed_until});
@@ -277,16 +269,16 @@ __END__
 
 =head1 SEE ALSO
 
-L<Helios::Panoptes>, L<Helios::Worker>, L<helios.pl>, <CGI::Application>, L<HTML::Template>
+L<Helios::Panoptes>, L<Helios::Service>, L<helios.pl>, <CGI::Application>, L<HTML::Template>
 
 =head1 AUTHOR 
 
-Andrew Johnson, <ajohnson at ittoolbox dotcom>
+Andrew Johnson, <lajandy at cpan dotorg>
 Ben Kucenski, <bkucenski at ittoolbox dotcom>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2008 by CEB Toolbox, Inc.
+Copyright (C) 2008-9 by CEB Toolbox, Inc.
 
 This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may have available.
 
