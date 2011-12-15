@@ -10,8 +10,9 @@ use CGI::Application::Plugin::DBH qw(dbh_config dbh);
 use Error qw(:try);
 
 use Helios::Service;
+use Helios::LogEntry::Levels ':all';
 
-our $VERSION = '1.44';
+our $VERSION = '1.44_5032';
 our $CONF_PARAMS;
 
 =head1 NAME
@@ -94,7 +95,18 @@ sub setup {
 	$CONF_PARAMS = $config;
 		
 	# connect to db 
-	$self->dbh_config($config->{dsn},$config->{user},$config->{password});
+# This section of the software is Copyright (C) 2011 by Andrew Johnson.
+# See copyright notice at the end of this file for license information.
+	# we need to support db options here too
+	my $optext = $config->{options};
+	my $dbopt = eval "{ $optext }";
+	if ($@) {
+		# we're just going to log a warning and ignore the option
+		$self->{service}->logMsg(LOG_WARNING, __PACKAGE__.': Invalid options specified in config: '.$optext);
+		$dbopt = undef;
+	}
+# End code under Andrew Johnson copyright.
+	$self->dbh_config($config->{dsn},$config->{user},$config->{password}, $dbopt);
 }
 
 =head2 teardown()
@@ -773,7 +785,7 @@ is service).
 sub collective {
 	my $self = shift;
 	my $q = $self->query();
-	if ($q->param('groupby') eq 'service') {
+	if ( defined($q->param('groupby')) && $q->param('groupby') eq 'service') {
 		return $self->_collective_service();		
 	} else {
 		return $self->_collective_host();
@@ -1263,6 +1275,8 @@ Andrew Johnson, <lajandy at cpan dotorg>
 =head1 COPYRIGHT AND LICENSE
 
 Copyright (C) 2008-9 by CEB Toolbox, Inc.
+
+Portions of this software, where noted, are Copyright (C) 2011 by Andrew Johnson.
 
 This library is free software; you can redistribute it and/or modify it under the same terms as 
 Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may 

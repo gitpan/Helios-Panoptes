@@ -1,5 +1,9 @@
 Revision history for Perl extension Helios::Panoptes.
 
+1.44_5032 Wed Dec 14 23:30:00 2011
+	-Panoptes.pm & Panoptes/Helper.pm: fixed bug where Panoptes ignored 
+	options config param for db connect (might be necessary for some
+	databases)
 1.44 Tue Apr 28 17:55:00 2009
 	-JobLog.pm: removed some unnecessary JOINs to greatly improve 
 	performance
