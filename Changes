@@ -1,9 +1,9 @@
 Revision history for Perl extension Helios::Panoptes.
 
-1.44_5032 Wed Dec 14 23:30:00 2011
-	-Panoptes.pm & Panoptes/Helper.pm: fixed bug where Panoptes ignored 
-	options config param for db connect (might be necessary for some
-	databases)
+1.50_2630 Wed Jun 27 01:15:00 2012
+	NEW DEVELOPMENT RELEASE CYCLE - primarily to add Oracle support
+	-Completely rewritten joblog.pl/JobLog.pm to work with Oracle 
+	and FastCGI
 1.44 Tue Apr 28 17:55:00 2009
 	-JobLog.pm: removed some unnecessary JOINs to greatly improve 
 	performance

@@ -5,7 +5,7 @@ use ExtUtils::MakeMaker;
 # the contents of the Makefile that is written.
 WriteMakefile(
     NAME              => 'Helios-Panoptes',
-    AUTHOR            => 'Andrew Johnson <ajohnson at ittoolbox dotcom>',
+    AUTHOR            => 'Andrew Johnson <lajandy at cpan dotcom>',
     ABSTRACT          => 'Web administration interface to the Helios distributed job processing system',
     LICENSE           => 'perl',
     VERSION_FROM      => 'lib/Helios/Panoptes.pm', # finds $VERSION
@@ -13,7 +13,7 @@ WriteMakefile(
                            'DBD::Mock'            => 0.11,		# needed by CGI::Application::Plugin::DBH
                            'CGI::Application::Plugin::DBH'
                                                   => 4.00,
-                           'HTML::Template'       => 2.90,
+                           'HTML::Template'       => 2.91,
                            'Parse::RecDescent'    => '',		# needed by HTML::Template::Expr
                            'HTML::Template::Expr' => 0.04,
                            'Helios'               => 2.00,

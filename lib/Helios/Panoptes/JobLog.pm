@@ -1,266 +1,215 @@
 package Helios::Panoptes::JobLog;
 
-use 5.008000;
+use 5.008;
 use strict;
 use warnings;
 use base qw(CGI::Application);
 use Data::Dumper;
-use Helios::Panoptes::Helper;
-use HTML::Template::Expr;
 
-use Error qw(:try);
+use CGI::Application::Plugin::DBH qw(dbh_config dbh);
 
-our $VERSION = '1.44';
+use Helios::Service;
+use Helios::Error;
+use Helios::LogEntry::Levels ':all';
+
+our $VERSION = '1.50_2630';
+
+our $CONF_PARAMS;
+our @LOG_PRIORITIES = ('LOG_EMERG','LOG_ALERT','LOG_CRIT','LOG_ERR','LOG_WARNING','LOG_NOTICE','LOG_INFO','LOG_DEBUG');
+our %FUNCMAP = ();
 
 =head1 NAME
 
-Helios::Panoptes::JobLog - Helios::Panoptes extension to handle the Job Log view
+Helios::Panoptes::JobLog - Helios::Panoptes app providing Job Log view
 
 =head1 DESCRIPTION
 
-Helios::Panoptes::JobLog handles the display for the Panoptes Job Log run mode.
+Helios::Panoptes::JobLog handles the display for the Panoptes Job Log.
 
 =cut
-
 
 sub setup {
 	my $self = shift;
 	$self->start_mode('job_log');
+	$self->mode_param('rm');
 	$self->run_modes(
-			job_log => 'job_log',
+		job_log => 'rm_job_log'
 	);
-	
+
+	my $inifile;
+	if (defined($ENV{HELIOS_INI}) ) {
+		$inifile = $ENV{HELIOS_INI};
+	} else {
+		$inifile = './helios.ini';
+	}
+	$self->{service} = Helios::Service->new();
+	$self->{service}->prep();
+	my $config = $self->{service}->getConfig();
+	$CONF_PARAMS = $config;
+
+	# connect to db 
+# This section of the software is Copyright (C) 2011 by Andrew Johnson.
+# See copyright notice at the end of this file for license information.
+	# we need to support db options here too
+	my $optext = $config->{options};
+	my $dbopt = eval "{ $optext }";
+	if ($@) {
+		# we're just going to log a warning and ignore the option
+		$self->{service}->logMsg(LOG_WARNING, __PACKAGE__.': Invalid options specified in config: '.$optext);
+		$dbopt = undef;
+	}
+# End code under Andrew Johnson copyright.
+	$self->dbh_config($config->{dsn},$config->{user},$config->{password}, {RaiseError => 1, AutoCommit => 1} );
 }
 
 
-sub teardown {
-	my $self = shift;
-}
+=head2 teardown()
 
-
-=head1 VIEW METHODS
-
-These methods define code that back the particular application pages.
-
-=head2 job_log()
-
-The job_log() method handles the display of the Job Log page.
+The only thing that currently happens in teardown() is the database is disconnected.
 
 =cut
 
-
-sub job_log {
-	my $self = shift;
-	my $q = $self->query();
-
-	my $j = 0;
-	my $job_id = -1;
-	my $sql = "";
-	my $date_parts;
-	
-	my @colors = qw[EFEFEF EAEAEA];
-
-	my @funcmap = Helios::Panoptes::Helper::option_function_map();
-	my %priority = Helios::Panoptes::Helper::option_priority();
-
-	my $function = 0;
-	
-	if ( defined($q->param('jobid')) ) { $job_id = $q->param('jobid'); }
-
-	return "" if $job_id == -1;
-	
-	$sql = "
-		SELECT *
-		FROM
-			job
-		WHERE
-			jobid = ?
-	";
-	
-	my $job_details = Helios::Panoptes::Helper::db_fetch_row($sql,$job_id);
-
-	if($job_details->{run_after})
-	{
-		$date_parts = Helios::Panoptes::Helper::splitEpochDate($job_details->{run_after});
-		$job_details->{run_after} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-	}
-	else
-	{
-		$job_details->{run_after} = '&nbsp;';
-	}
-	
-	if($job_details->{insert_time})
-	{
-		$date_parts = Helios::Panoptes::Helper::splitEpochDate($job_details->{insert_time});
-		$job_details->{insert_time} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-	}
-	else
-	{
-		$job_details->{insert_time} = '&nbsp;';
-	}
-
-	if($job_details->{grabbed_until})
-	{
-		$date_parts = Helios::Panoptes::Helper::splitEpochDate($job_details->{grabbed_until});
-		$job_details->{grabbed_until} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-	}
-	else
-	{
-		$job_details->{grabbed_until} = '&nbsp;';
-	}
-
-	$job_details->{priority} = $priority{$job_details->{priority}} || $job_details->{priority};
-
-	$sql = "
-		SELECT *
-		FROM
-			error
-		WHERE
-			jobid = ?
-	";
-	
-	my @job_error = Helios::Panoptes::Helper::db_fetch_all($sql,$job_id);
-
-	$j = 1;	
-	foreach(@job_error)
-	{
-		$date_parts = Helios::Panoptes::Helper::splitEpochDate($_->{error_time});
-		$_->{error_time} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-
-		$_->{color} = $colors[$j];
-		$j=1-$j;
-	}
-
-	$sql = "
-		SELECT *
-		FROM
-			helios_job_history_tb
-		WHERE
-			jobid = ?
-		ORDER BY
-			complete_time DESC
-	";
-	
-	my @job_history = Helios::Panoptes::Helper::db_fetch_all($sql,$job_id);
-	
-	$j = 1;
-	foreach(@job_history)
-	{
-		if($_->{complete_time})
-		{
-			$date_parts = Helios::Panoptes::Helper::splitEpochDate($_->{complete_time});
-			$_->{complete_time} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-		}
-		else
-		{
-			$_->{complete_time} = '&nbsp;';
-		}
-	
-		if($_->{grabbed_until})
-		{
-			$date_parts = Helios::Panoptes::Helper::splitEpochDate($_->{grabbed_until});
-			$_->{grabbed_until} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-		}
-		else
-		{
-			$_->{grabbed_until} = '&nbsp;';
-		}
-
-		if($_->{run_after})
-		{
-			$date_parts = Helios::Panoptes::Helper::splitEpochDate($_->{run_after});
-			$_->{run_after} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-		}
-		else
-		{
-			$_->{run_after} = '&nbsp;';
-		}
-
-		if($_->{insert_time})
-		{
-			$date_parts = Helios::Panoptes::Helper::splitEpochDate($_->{insert_time});
-			$_->{insert_time} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-		}
-		else
-		{
-			$_->{insert_time} = '&nbsp;';
-		}
-
-		$_->{priority} = $priority{$_->{priority}} || $_->{priority};
-
-		$_->{color} = $colors[$j];
-		$j=1-$j;
-	}
-
-	$sql = "
-		SELECT
-			*
-		FROM
-			helios_log_tb
-		WHERE
-			jobid = ?
-		ORDER BY
-			log_time DESC
-	";
-	
-	my @logs = Helios::Panoptes::Helper::db_fetch_all($sql,$job_id);
-	
-
-	# http://search.cpan.org/~saper/Sys-Syslog-0.24/Syslog.pm
-
-	$j = 1;	
-	foreach(@logs)
-	{
-		if($_->{log_time})
-		{
-			$date_parts = Helios::Panoptes::Helper::splitEpochDate($_->{log_time});
-			$_->{created_at} = $date_parts->{YYYY}.'-'.$date_parts->{MM}.'-'.$date_parts->{DD}.' '.$date_parts->{HH24}.':'.$date_parts->{MI}.':'.$date_parts->{SS};
-		}
-		else
-		{
-			$_->{created_at} = '&nbsp;';
-		}
-		
-		$_->{color} = $colors[$j];
-		$_->{priority} = $priority{$_->{priority}} || $_->{priority};
-		$j=1-$j;
-	}
-
-	$job_details = $job_history[0] if(!$job_details->{arg});
-    my $func_details = Helios::Panoptes::Helper::db_fetch_row("SELECT funcname FROM funcmap WHERE funcid = ?", $job_details->{funcid});
-    for (my $i = 0; $i < @job_history; $i++) { 
-        $job_history[$i]->{funcname} = $func_details->{funcname};  
-    }
-    for (my $i = 0; $i < @job_error; $i++) { 
-        $job_error[$i]->{funcname} = $func_details->{funcname};  
-    }
-    
-	# this handles <params> w/newlines
-	$job_details->{arg} =~ s/^.*?\</\</s;
-	
-	$job_details->{arg} =~ s/>/\&gt\;/g;
-	$job_details->{arg} =~ s/</\&lt\;/g;
-	
-	my $tmpl = HTML::Template::Expr->new(filename => 'tmpl/job_log.html', die_on_bad_params => 0);
-	$tmpl->param(TITLE=>"Helios - Job Log " . $job_id);
-	$tmpl->param(JOBID=>$job_id);
-	$tmpl->param(LOG_ENTRIES => \@logs);
-	$tmpl->param(ERROR_ENTRIES => \@job_error);
-	$tmpl->param(HISTORY_ENTRIES => \@job_history);
-	
-	$tmpl->param(JOB_ARG => $job_details->{arg});
-	$tmpl->param(JOB_PRIORITY => $job_details->{priority});
-	$tmpl->param(JOB_RUN_AFTER => $job_details->{run_after});
-	$tmpl->param(JOB_COALESCE => $job_details->{coalesce});
-	$tmpl->param(JOB_FUNCTION_NAME => $func_details->{funcname});
-	$tmpl->param(JOB_UNIQUE_KEY => $job_details->{uniqkey});
-	$tmpl->param(JOB_INSERT_TIME => $job_details->{insert_time});
-	$tmpl->param(JOB_GRABBED_UNTIL => $job_details->{grabbed_until});
-
-	return $tmpl->output();
-
+sub teardown {
+	$_[0]->dbh->disconnect();
 }
 
+
+
+=head1 RUN MODES
+
+
+=head2 rm_job_log()
+
+The rm_job_log() method handles the display of the Job Log page.
+
+=cut
+
+sub rm_job_log {
+	my $self = shift;
+	my $dbh = $self->dbh();
+	my $q = $self->query();
+	my %funcmap = $self->getFuncmap();
+	my %jobinfo;
+	my @errorinfo;
+	my @loginfo;
+	my @jobhistory;
+	
+	my $jobid;
+	if ( defined($q->param('jobid')) ) { $jobid = $q->param('jobid'); }
+	unless ( defined($jobid) ) {
+		Helios::Error::InvalidArg->throw('The jobid parameter is required.');
+	}	
+
+	# JOB
+	my $jobtb_sql = qq{ SELECT funcid, insert_time, run_after, grabbed_until, arg FROM job WHERE jobid = ? };
+	my $jobtb_sth = $dbh->prepare_cached($jobtb_sql);
+	$jobtb_sth->execute($jobid);
+	my $jobtb_rs = $jobtb_sth->fetchrow_arrayref();
+	$jobtb_sth->finish();
+	$jobinfo{jobid}         = $jobid;
+	$jobinfo{service_name}  = $funcmap{ $jobtb_rs->[0] };
+	$jobinfo{insert_time}   = $jobtb_rs->[1] ? scalar localtime($jobtb_rs->[1]) : undef;
+	$jobinfo{run_after}     = $jobtb_rs->[2] ? scalar localtime($jobtb_rs->[2]) : undef;
+	$jobinfo{grabbed_until} = $jobtb_rs->[3] ? scalar localtime($jobtb_rs->[3]) : undef;
+	$jobinfo{arg}           = $jobtb_rs->[4];
+
+	
+	# ERROR
+	my $errtb_sql = qq{ SELECT funcid, error_time, message FROM error WHERE jobid = ? ORDER BY error_time DESC };
+	my $errtb_sth = $dbh->prepare_cached($errtb_sql);
+	$errtb_sth->execute($jobid);
+	my $errtb_rs = $errtb_sth->fetchall_arrayref();
+	$errtb_sth->finish();
+	foreach (@$errtb_rs) {
+		my %err;
+		$err{funcname}   = $funcmap{ $_->[1] };
+		$err{error_time} = scalar localtime($_->[0]);
+		$err{message}    = $_->[2];
+		push(@errorinfo, \%err);
+	}
+	
+	# HELIOS_JOB_HISTORY_TB
+	my $jhtb_sql = qq{ SELECT funcid, insert_time, run_after, grabbed_until, complete_time, exitstatus, arg FROM helios_job_history_tb WHERE jobid = ? ORDER BY complete_time DESC };
+	my $jhtb_sth = $dbh->prepare_cached($jhtb_sql);
+	$jhtb_sth->execute($jobid);
+	my $jhtb_rs = $jhtb_sth->fetchall_arrayref();
+	$jhtb_sth->finish();
+	foreach (@$jhtb_rs) {
+		my %hist;
+		$hist{funcname}      = $funcmap{ $_->[0] };
+		$hist{insert_time}   = scalar localtime($_->[1]);
+		$hist{run_after}     = scalar localtime($_->[2]);
+		$hist{grabbed_until} = scalar localtime($_->[3]);
+		$hist{complete_time} = scalar localtime($_->[4]);
+		$hist{exitstatus}    = $_->[5];
+		$hist{arg}           = $_->[6];
+		push(@jobhistory, \%hist);
+	}
+	# fill in info from job history if the job isn't in the queue
+	unless ($jobinfo{insert_time}) {
+		$jobinfo{service_name}  = $jobhistory[0]->{funcname};
+		$jobinfo{insert_time}   = $jobhistory[0]->{insert_time};
+		$jobinfo{run_after}     = $jobhistory[0]->{run_after};
+		$jobinfo{grabbed_until} = $jobhistory[0]->{grabbed_until};
+		$jobinfo{arg}           = $jobhistory[0]->{arg};		
+	}
+	
+	
+	# HELIOS_LOG_TB
+	my $ltb_sql = qq{ SELECT log_time, host, process_id, funcid, job_class, priority, message FROM helios_log_tb WHERE jobid = ? ORDER BY log_time DESC };
+	my $ltb_sth = $dbh->prepare_cached($ltb_sql);
+	$ltb_sth->execute($jobid);
+	my $ltb_rs = $ltb_sth->fetchall_arrayref();
+	$ltb_sth->finish();
+	foreach(@$ltb_rs) {
+		my %log;
+		$log{created_at} = scalar localtime($_->[0]);
+		$log{host}       = $_->[1];
+		$log{process_id} = $_->[2];
+		$log{funcid}     = $_->[3];
+		$log{job_class}  = $_->[4];
+		$log{priority}   = $LOG_PRIORITIES[ $_->[5] ];
+		$log{message}    = $_->[6];
+		push(@loginfo, \%log);
+	}
+	
+	my $t = $self->load_tmpl('../cgi-bin/tmpl/job_log.html', die_on_bad_params => 0, loop_context_vars => 1);
+	$t->param(TITLE => "Helios - Job Log " . $jobid);
+	$t->param(JOBID => $jobid);
+	
+	$t->param(JOB_ARG           => $jobinfo{arg});
+#	$t->param(JOB_PRIORITY      => $jobinfo{priority});
+	$t->param(JOB_INSERT_TIME   => $jobinfo{insert_time});
+	$t->param(JOB_RUN_AFTER     => $jobinfo{run_after});
+#	$t->param(JOB_COALESCE      => $jobinfo{coalesce});
+	$t->param(JOB_SERVICE_NAME  => $jobinfo{service_name});
+#	$t->param(JOB_UNIQUE_KEY    => $jobinfo{uniqkey});
+	$t->param(JOB_GRABBED_UNTIL => $jobinfo{grabbed_until});
+
+	$t->param(ERROR_ENTRIES     => \@errorinfo);
+	$t->param(HISTORY_ENTRIES   => \@jobhistory);
+	$t->param(LOG_ENTRIES       => \@loginfo);
+
+	return $t->output();
+}
+
+sub getFuncmap {
+	my $self = shift;
+	if (keys %FUNCMAP) { return %FUNCMAP; }
+	my $dbh = $self->dbh();
+
+	my $sth = $dbh->prepare_cached("SELECT funcid, funcname FROM funcmap");
+	unless($sth) { throw Error::Simple($dbh->errstr); }
+	$sth->execute();
+
+	while (my $r = $sth->fetchrow_arrayref() ) {
+		$FUNCMAP{$r->[0]} = $r->[1];
+		$FUNCMAP{$r->[1]} = $r->[0];
+	}
+	$sth->finish();
+	
+	return %FUNCMAP;
+}
 
 
 
@@ -269,18 +218,19 @@ __END__
 
 =head1 SEE ALSO
 
-L<Helios::Panoptes>, L<Helios::Service>, L<helios.pl>, <CGI::Application>, L<HTML::Template>
+L<Helios::Panoptes>, L<Helios>, L<CGI::Application>
 
 =head1 AUTHOR 
 
 Andrew Johnson, <lajandy at cpan dotorg>
-Ben Kucenski, <bkucenski at ittoolbox dotcom>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2008-9 by CEB Toolbox, Inc.
+Copyright (C) 2012 Logical Helion, LLC.
 
-This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may have available.
+This library is free software; you can redistribute it and/or modify it under 
+the same terms as Perl itself, either Perl version 5.8.0 or, at your option, 
+any later version of Perl 5 you may have available.
 
 =head1 WARRANTY 
 

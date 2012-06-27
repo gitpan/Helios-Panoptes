@@ -1,11 +1,18 @@
 #!/usr/bin/perl
 
-use Helios::Panoptes::JobLog;
-my $helios = Helios::Panoptes::JobLog->new(
-	TMPL_PATH => 'tmpl'
-);
-$helios->run();
+use 5.008;
+use strict;
+use warnings;
+use CGI::Fast ();
 
+use Helios::Panoptes::JobLog;
+
+our $VERSION = '1.50_2630';
+
+while (my $q = new CGI::Fast){
+   my $hpjl = Helios::Panoptes::JobLog->new(QUERY => $q, TMPL_PATH => 'tmpl');   
+   $hpjl->run();
+}
 
 =head1 NAME
 
@@ -25,7 +32,7 @@ Andrew Johnson, <lajandy at cpan dotorg>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2008-9 by CEB Toolbox, Inc.
+Copyright (C) 2012 by Logical Helion, LLC.
 
 This library is free software; you can redistribute it and/or modify it under the same terms as 
 Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may 

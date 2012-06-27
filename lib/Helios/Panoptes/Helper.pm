@@ -6,9 +6,8 @@ use warnings;
 use Data::Dumper;
 use DBI;
 use Helios::Service;
-use Helios::LogEntry::Levels ':all';
 
-our $VERSION = '1.44_5032';
+our $VERSION = '1.40';
 our $dbh;
 our %config;
 
@@ -21,18 +20,7 @@ if (defined($ENV{HELIOS_INI}) ) {
 my $worker = new Helios::Service;
 %config = $worker->getConfigFromIni($inifile);
 
-# This section of the software is Copyright (C) 2011 by Andrew Johnson.
-# See copyright notice at the end of this file for license information.
-	# we need to support db options here too
-	my $optext = $config{options};
-	my $dbopt = eval "{ $optext }";
-	if ($@) {
-		# we're just going to log a warning and ignore the option
-		$worker->logMsg(LOG_WARNING, __PACKAGE__.': Invalid options specified in config: '.$optext);
-		$dbopt = undef;
-	}
-# End code under Andrew Johnson copyright.
-$dbh = DBI->connect($config{dsn}, $config{user}, $config{password}, $dbopt);
+$dbh = DBI->connect($config{dsn}, $config{user}, $config{password});
 
 =head1 NAME
 
@@ -361,8 +349,6 @@ Ben Kucenski, <bkucenski at toolbox dotcom>
 =head1 COPYRIGHT AND LICENSE
 
 Copyright (C) 2008-9 by CEB Toolbox, Inc.
-
-Portions of this software, where noted, are Copyright (C) 2011 by Andrew Johnson.
 
 This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself, either Perl version 5.8.0 or, at your option, any later version of Perl 5 you may have available.
 
