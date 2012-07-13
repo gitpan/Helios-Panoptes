@@ -1,65 +1,41 @@
-package Helios::Panoptes::JobLog;
+package Helios::Panoptes::JobInfo;
 
 use 5.008;
 use strict;
 use warnings;
-use base qw(CGI::Application);
+use base qw(Helios::Panoptes::Base);
 use Data::Dumper;
-
 use CGI::Application::Plugin::DBH qw(dbh_config dbh);
-use Data::ObjectDriver::Driver::DBI;
 
-use Helios::Service;
 use Helios::Error;
-use Helios::LogEntry::Levels ':all';
 
-our $VERSION = '1.50_2631';
-
-our $CONF_PARAMS;
-our @LOG_PRIORITIES = ('LOG_EMERG','LOG_ALERT','LOG_CRIT','LOG_ERR','LOG_WARNING','LOG_NOTICE','LOG_INFO','LOG_DEBUG');
-our %FUNCMAP = ();
+our $VERSION = '1.51_2820';
 
 =head1 NAME
 
-Helios::Panoptes::JobLog - Helios::Panoptes app providing Job Log view
+Helios::Panoptes::JobInfo - Helios::Panoptes app providing Job Info view
 
 =head1 DESCRIPTION
 
-Helios::Panoptes::JobLog handles the display for the Panoptes Job Log.
+Helios::Panoptes::JobLog handles the display for the Panoptes Job Info.
+
+=head1 CGI::APPLICATION METHODS
+
+=head2 setup()
 
 =cut
 
 sub setup {
 	my $self = shift;
-	$self->start_mode('job_log');
+	$self->start_mode('jobinfo');
 	$self->mode_param('rm');
 	$self->run_modes(
-		job_log => 'rm_job_log'
+		jobinfo => 'rm_jobinfo'
 	);
 
-	my $inifile;
-	if (defined($ENV{HELIOS_INI}) ) {
-		$inifile = $ENV{HELIOS_INI};
-	} else {
-		$inifile = './helios.ini';
-	}
-	$self->{service} = Helios::Service->new();
-	$self->{service}->prep();
-	my $config = $self->{service}->getConfig();
-	$CONF_PARAMS = $config;
+	my $config = $self->parseConfig();
 
 	# connect to db 
-# This section of the software is Copyright (C) 2011 by Andrew Johnson.
-# See copyright notice at the end of this file for license information.
-	# we need to support db options here too
-	my $optext = $config->{options};
-	my $dbopt = eval "{ $optext }";
-	if ($@) {
-		# we're just going to log a warning and ignore the option
-		$self->{service}->logMsg(LOG_WARNING, __PACKAGE__.': Invalid options specified in config: '.$optext);
-		$dbopt = undef;
-	}
-# End code under Andrew Johnson copyright.
 	$self->dbh_config($config->{dsn},$config->{user},$config->{password}, {RaiseError => 1, AutoCommit => 1} );
 }
 
@@ -75,21 +51,20 @@ sub teardown {
 }
 
 
-
 =head1 RUN MODES
 
+=head2 rm_jobinfo()
 
-=head2 rm_job_log()
-
-The rm_job_log() method handles the display of the Job Log page.
+The rm_jobinfo() method handles the display of the Job Log page.
 
 =cut
 
-sub rm_job_log {
+sub rm_jobinfo {
 	my $self = shift;
 	my $dbh = $self->dbh();
 	my $q = $self->query();
-	my %funcmap = $self->getFuncmap();
+	my %funcmap = $self->getFuncmapByFuncid();
+	my @loglevels = $self->getLogLevelList();
 	my %jobinfo;
 	my @errorinfo;
 	my @loginfo;
@@ -102,28 +77,18 @@ sub rm_job_log {
 	}	
 
 	# JOB
-=bad
-	my $jobtb_sql = qq{ SELECT funcid, insert_time, run_after, grabbed_until, arg FROM job WHERE jobid = ? };
-	my $jobtb_sth = $dbh->prepare_cached($jobtb_sql);
-	$jobtb_sth->execute($jobid);
-	my $jobtb_rs = $jobtb_sth->fetchrow_arrayref();
-	$jobtb_sth->finish();
-	$jobinfo{jobid}         = $jobid;
-	$jobinfo{service_name}  = $funcmap{ $jobtb_rs->[0] };
-	$jobinfo{insert_time}   = $jobtb_rs->[1] ? scalar localtime($jobtb_rs->[1]) : undef;
-	$jobinfo{run_after}     = $jobtb_rs->[2] ? scalar localtime($jobtb_rs->[2]) : undef;
-	$jobinfo{grabbed_until} = $jobtb_rs->[3] ? scalar localtime($jobtb_rs->[3]) : undef;
-	$jobinfo{arg}           = $jobtb_rs->[4];
-=cut
 	$jobinfo{jobid} = $jobid;
 	my $drvr = $self->initDriver();
 	my $sj = $drvr->lookup('TheSchwartz::Job' => $jobid);
 	if ( defined($sj) ) {
 		$jobinfo{service_name}  = $funcmap{ $sj->funcid };
-		$jobinfo{insert_time}   = scalar localtime($sj->insert_time);
-		$jobinfo{run_after}     = scalar localtime($sj->run_after);
-		$jobinfo{grabbed_until} = scalar localtime($sj->grabbed_until);
+		$jobinfo{insert_time}   = defined($sj->insert_time)   ? scalar localtime($sj->insert_time)   : undef;
+		$jobinfo{run_after}     = defined($sj->run_after)     ? scalar localtime($sj->run_after)     : undef;
+		$jobinfo{grabbed_until} = $sj->grabbed_until ? scalar localtime($sj->grabbed_until) : undef;
 		$jobinfo{arg}           = $sj->arg()->[0];
+		$jobinfo{uniqkey}       = $sj->uniqkey; 
+		$jobinfo{priority}      = $sj->priority;
+		$jobinfo{coalesce}      = $sj->coalesce;
 	}
 
 	# ERROR
@@ -134,8 +99,8 @@ sub rm_job_log {
 	$errtb_sth->finish();
 	foreach (@$errtb_rs) {
 		my %err;
-		$err{funcname}   = $funcmap{ $_->[1] };
-		$err{error_time} = scalar localtime($_->[0]);
+		$err{funcname}   = $funcmap{ $_->[0] };
+		$err{error_time} = scalar localtime($_->[1]);
 		$err{message}    = $_->[2];
 		push(@errorinfo, \%err);
 	}
@@ -175,64 +140,41 @@ sub rm_job_log {
 	$ltb_sth->finish();
 	foreach(@$ltb_rs) {
 		my %log;
-		$log{created_at} = scalar localtime($_->[0]);
+		$log{log_time}   = scalar localtime($_->[0]);
 		$log{host}       = $_->[1];
-		$log{process_id} = $_->[2];
+		$log{pid}        = $_->[2];
 		$log{funcid}     = $_->[3];
 		$log{job_class}  = $_->[4];
-		$log{priority}   = $LOG_PRIORITIES[ $_->[5] ];
+		$log{priority}   = $loglevels[ $_->[5] ];
 		$log{message}    = $_->[6];
 		push(@loginfo, \%log);
 	}
 	
-	my $t = $self->load_tmpl('job_log.html', die_on_bad_params => 0, loop_context_vars => 1);
+	my $t = $self->load_tmpl('jobinfo.html', die_on_bad_params => 0, loop_context_vars => 1);
 	$t->param(TITLE => "Helios - Job Log " . $jobid);
 	$t->param(JOBID => $jobid);
 	
 	$t->param(JOB_ARG           => $jobinfo{arg});
-#	$t->param(JOB_PRIORITY      => $jobinfo{priority});
 	$t->param(JOB_INSERT_TIME   => $jobinfo{insert_time});
 	$t->param(JOB_RUN_AFTER     => $jobinfo{run_after});
-#	$t->param(JOB_COALESCE      => $jobinfo{coalesce});
 	$t->param(JOB_SERVICE_NAME  => $jobinfo{service_name});
-#	$t->param(JOB_UNIQUE_KEY    => $jobinfo{uniqkey});
 	$t->param(JOB_GRABBED_UNTIL => $jobinfo{grabbed_until});
+# these are TheSchwartz::Job features that are technically supported,
+# but Helios never actually uses itself. They're left out of the default 
+# template theme but could be added if a user needs to customize.
+	$t->param(JOB_UNIQUE_KEY    => $jobinfo{uniqkey});
+	$t->param(JOB_PRIORITY      => $jobinfo{priority});
+	$t->param(JOB_COALESCE      => $jobinfo{coalesce});
 
-	$t->param(ERROR_ENTRIES     => \@errorinfo);
-	$t->param(HISTORY_ENTRIES   => \@jobhistory);
-	$t->param(LOG_ENTRIES       => \@loginfo);
+	$t->param(ERRORS       => \@errorinfo);
+	$t->param(JOB_HISTORY  => \@jobhistory);
+	$t->param(LOG_ENTRIES  => \@loginfo);
+
+
 
 	return $t->output();
 }
 
-sub getFuncmap {
-	my $self = shift;
-	if (keys %FUNCMAP) { return %FUNCMAP; }
-	my $dbh = $self->dbh();
-
-	my $sth = $dbh->prepare_cached("SELECT funcid, funcname FROM funcmap");
-	unless($sth) { throw Error::Simple($dbh->errstr); }
-	$sth->execute();
-
-	while (my $r = $sth->fetchrow_arrayref() ) {
-		$FUNCMAP{$r->[0]} = $r->[1];
-		$FUNCMAP{$r->[1]} = $r->[0];
-	}
-	$sth->finish();
-	
-	return %FUNCMAP;
-}
-
-sub initDriver {
-	my $self = shift;
-	my $config = $CONF_PARAMS;
-	my $driver = Data::ObjectDriver::Driver::DBI->new(
-	    dsn      => $config->{dsn},
-	    username => $config->{user},
-	    password => $config->{password}
-	);	
-	return $driver;	
-}
 
 1;
 __END__

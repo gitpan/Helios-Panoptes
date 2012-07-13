@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Helios-Panoptes
-version:            1.50_2631
+version:            1.51_2830
 abstract:           Web administration interface to the Helios distributed job processing system
 author:
     - Andrew Johnson <lajandy at cpan dotcom>
@@ -22,7 +22,7 @@ no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.57_05
+generated_by:       ExtUtils::MakeMaker version 6.55_02
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4
